@@ -1,0 +1,692 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>DGM Property Map</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Public+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>
+/* Layout: full-height split — aerial parcel map left, record panel right (stacks map-over-panel on phones) */
+:root{
+  --bg:#f3f5f4; --surface:#ffffff; --surface-2:#eaeeec; --line:#d3dbd7; --fg:#18231f; --muted:#5b6a64;
+  --accent:#b8860b; --accent-ink:#ffffff; --accent-soft:#f6ecd2; --pine:#1f4d3f;
+  --good:#2f8a5c; --warn:#d08a14; --bad:#c2414f; --none:#7c8a85;
+  --font-display:"Bricolage Grotesque",ui-sans-serif,system-ui,sans-serif;
+  --font-body:"Public Sans",ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+  --font-mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  --r:8px;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0f1513; --surface:#161e1b; --surface-2:#1e2925; --line:#2c3a35; --fg:#e4ebe7; --muted:#93a39c;
+  --accent:#e0b44a; --accent-ink:#1a1405; --accent-soft:#3a3018; --pine:#8fc7b0;
+  --good:#4fb882; --warn:#e3a33a; --bad:#e06673; --none:#8a9893; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0f1513; --surface:#161e1b; --surface-2:#1e2925; --line:#2c3a35; --fg:#e4ebe7; --muted:#93a39c;
+  --accent:#e0b44a; --accent-ink:#1a1405; --accent-soft:#3a3018; --pine:#8fc7b0;
+  --good:#4fb882; --warn:#e3a33a; --bad:#e06673; --none:#8a9893; color-scheme:dark}
+*,*::before,*::after{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0}
+[hidden]{display:none!important}
+body{background:var(--bg);color:var(--fg);font-family:var(--font-body);font-size:14px;line-height:1.45;overflow:hidden}
+button,input,select,textarea{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.app{height:100%;display:grid;grid-template-rows:auto 1fr;grid-template-columns:1fr minmax(360px,440px)}
+header.top{grid-column:1/-1;display:flex;align-items:center;gap:16px;padding-block:10px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));background:var(--surface);border-bottom:1px solid var(--line);flex-wrap:wrap}
+.brand{display:flex;flex-direction:column;line-height:1.1;min-width:0}
+.brand h1{font-family:var(--font-display);font-weight:700;font-size:19px;margin:0;letter-spacing:-.01em}
+.brand span{font-size:12px;color:var(--muted)}
+.search{position:relative;flex:1 1 260px;max-width:440px;margin-left:auto}
+.search input{width:100%;padding:8px 12px;border:1px solid var(--line);border-radius:var(--r);background:var(--bg)}
+.results{position:absolute;z-index:1200;top:calc(100% + 4px);left:0;right:0;background:var(--surface);border:1px solid var(--line);border-radius:var(--r);box-shadow:0 8px 24px rgb(0 0 0/.18);max-height:320px;overflow:auto}
+.results button{display:block;width:100%;text-align:left;padding:8px 12px;border:0;background:none;cursor:pointer;border-bottom:1px solid var(--line)}
+.results button:hover,.results button:focus{background:var(--surface-2)}
+.results small{display:block;color:var(--muted)}
+.mapwrap{position:relative;min-height:0}
+#map{position:absolute;inset:0;background:var(--surface-2)}
+.leaflet-container{font-family:var(--font-body)}
+.mapctl{position:absolute;z-index:900;top:12px;right:12px;display:flex;flex-direction:column;gap:8px;align-items:flex-end}
+.chipbar{display:flex;gap:4px;background:var(--surface);border:1px solid var(--line);border-radius:999px;padding:3px;box-shadow:0 2px 8px rgb(0 0 0/.15)}
+.chipbar button{border:0;background:none;padding:5px 11px;border-radius:999px;cursor:pointer;font-size:12.5px;font-weight:500;color:var(--muted)}
+.chipbar button[aria-pressed="true"]{background:var(--pine);color:var(--surface)}
+.legend{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:8px 10px;font-size:12px;box-shadow:0 2px 8px rgb(0 0 0/.15);display:grid;gap:4px}
+.legend b{font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+.legend i{display:inline-block;width:12px;height:12px;border-radius:3px;margin-right:6px;vertical-align:-2px;border:2px solid transparent}
+.credit{position:absolute;z-index:900;left:8px;bottom:6px;font-size:10.5px;color:#fff;text-shadow:0 1px 2px #000;pointer-events:none}
+.st-label{color:#fff;font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;white-space:nowrap;text-shadow:0 0 3px #000,0 0 6px #000;pointer-events:none;transform-origin:center}
+.leaflet-tooltip.ptip{font-family:var(--font-body);font-size:12px;padding:4px 8px;border-radius:6px}
+/* Panel */
+aside.panel{border-left:1px solid var(--line);background:var(--surface);display:flex;flex-direction:column;min-height:0;min-width:0}
+.tabs{display:flex;border-bottom:1px solid var(--line);padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));gap:4px}
+.tabs button{border:0;background:none;padding:11px 10px 9px;cursor:pointer;font-weight:600;color:var(--muted);border-bottom:2px solid transparent}
+.tabs button[aria-selected="true"]{color:var(--fg);border-bottom-color:var(--accent)}
+.tabs .count{font-family:var(--font-mono);font-size:11px;background:var(--surface-2);border-radius:999px;padding:1px 6px;margin-left:4px}
+.pane{flex:1;overflow:auto;padding-block:16px 32px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.banner{font-size:12.5px;padding:8px 12px;border-radius:var(--r);background:var(--accent-soft);margin-bottom:12px}
+.empty{color:var(--muted);display:grid;gap:10px;padding-top:8px}
+.empty h2{font-family:var(--font-display);color:var(--fg);font-size:20px;margin:0}
+.ph{display:flex;align-items:flex-start;gap:12px;margin-bottom:12px}
+.ph h2{font-family:var(--font-display);font-size:22px;line-height:1.15;margin:0;text-wrap:balance}
+.ph .own{color:var(--muted);margin-top:2px}
+.score-badge{flex:none;margin-left:auto;width:52px;height:52px;border-radius:10px;display:grid;place-items:center;color:#fff;font-family:var(--font-display);font-size:22px;font-weight:700;line-height:1}
+.score-badge small{display:block;font-family:var(--font-body);font-size:9.5px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;opacity:.9}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px}
+.chip{font-size:11.5px;padding:2px 8px;border-radius:999px;background:var(--surface-2);color:var(--fg);border:1px solid var(--line)}
+.chip.mono{font-family:var(--font-mono)}
+.chip.stage{background:var(--pine);color:var(--surface);border-color:transparent}
+section.blk{border-top:1px solid var(--line);padding-top:14px;margin-top:14px}
+section.blk>h3{font-size:11.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:0 0 10px;display:flex;align-items:center;gap:8px}
+section.blk>h3 .sp{flex:1}
+dl.kv{display:grid;grid-template-columns:minmax(110px,40%) 1fr;gap:6px 12px;margin:0}
+dl.kv dt{color:var(--muted)}
+dl.kv dd{margin:0;font-variant-numeric:tabular-nums;min-width:0;overflow-wrap:anywhere}
+.num{font-family:var(--font-mono);font-size:13px}
+.links{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+a.lk,button.lk{font-size:12.5px;color:var(--pine);text-decoration:none;border:1px solid var(--line);border-radius:6px;padding:4px 9px;background:none;cursor:pointer}
+a.lk:hover,button.lk:hover{background:var(--surface-2)}
+.note-src{font-size:11.5px;color:var(--muted);margin-top:8px}
+.btn{border:1px solid var(--line);background:var(--surface);border-radius:var(--r);padding:8px 14px;cursor:pointer;font-weight:600}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.btn.ghost{border-color:transparent;background:none;color:var(--muted);font-weight:500}
+.btn.danger{color:var(--bad)}
+.btn:disabled{opacity:.5;cursor:default}
+.fgrid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.f{display:grid;gap:4px;min-width:0}
+.f.full{grid-column:1/-1}
+.f label{font-size:12px;color:var(--muted)}
+.f input,.f select,.f textarea{width:100%;padding:7px 9px;border:1px solid var(--line);border-radius:6px;background:var(--bg)}
+.f textarea{min-height:60px;resize:vertical}
+.crit{display:grid;gap:4px;padding:8px 0;border-bottom:1px dashed var(--line)}
+.crit:last-of-type{border-bottom:0}
+.crit .top{display:flex;align-items:center;gap:8px}
+.crit .top b{font-weight:600}
+.crit .top small{color:var(--muted)}
+.dots{display:flex;gap:4px;margin-left:auto}
+.dots button{width:30px;height:28px;border-radius:6px;border:1px solid var(--line);background:var(--bg);cursor:pointer;font-family:var(--font-mono);font-size:12.5px}
+.dots button[aria-pressed="true"]{color:#fff;border-color:transparent}
+.crit input{width:100%;padding:5px 8px;border:1px solid var(--line);border-radius:6px;background:var(--bg);font-size:12.5px}
+.overall{display:flex;align-items:center;gap:10px;margin-top:10px;padding:10px;border-radius:var(--r);background:var(--surface-2)}
+.overall .big{font-family:var(--font-display);font-size:24px;font-weight:700}
+.rows{display:grid;gap:8px}
+.row{display:grid;gap:6px;grid-template-columns:repeat(2,1fr) auto;padding:8px;border:1px solid var(--line);border-radius:var(--r);background:var(--bg)}
+.row input{width:100%;padding:5px 7px;border:1px solid var(--line);border-radius:5px;background:var(--surface);font-size:12.5px;min-width:0}
+.row .x{grid-row:1;grid-column:3;border:0;background:none;color:var(--muted);cursor:pointer;font-size:16px;padding:0 4px}
+.row .wide{grid-column:1/3}
+.calc{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.calc .out{grid-column:1/-1;display:grid;grid-template-columns:1fr auto;gap:4px 12px;padding:10px;border-radius:var(--r);background:var(--surface-2);font-variant-numeric:tabular-nums}
+.calc .out b{font-family:var(--font-mono)}
+.savebar{position:sticky;bottom:-32px;margin:16px calc(-1 * max(16px,env(safe-area-inset-left,0px))) -32px;padding:10px max(16px,env(safe-area-inset-right,0px)) calc(10px + env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px));background:var(--surface);border-top:1px solid var(--line);display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.savebar .meta{font-size:12px;color:var(--muted);flex:1;min-width:140px}
+.confirm{display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:12.5px}
+.notes{display:grid;gap:10px}
+.notes .n{padding:8px 10px;border-radius:var(--r);background:var(--surface-2)}
+.notes .n header{display:flex;gap:6px;font-size:11.5px;color:var(--muted);margin-bottom:2px}
+.notes .n header b{color:var(--fg);font-weight:600}
+.notes .n p{margin:0;white-space:pre-wrap;overflow-wrap:anywhere}
+.addnote{display:flex;gap:8px;margin-top:8px}
+.addnote textarea{flex:1;min-height:40px;padding:7px 9px;border:1px solid var(--line);border-radius:6px;background:var(--bg);resize:vertical}
+/* Watchlist */
+.wlbar{display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap}
+.wlbar label{font-size:12px;color:var(--muted)}
+.wlbar select{padding:5px 8px;border:1px solid var(--line);border-radius:6px;background:var(--bg)}
+.wl{display:grid;gap:6px}
+.wl button{display:grid;grid-template-columns:40px 1fr auto;gap:10px;align-items:center;text-align:left;padding:8px;border:1px solid var(--line);border-radius:var(--r);background:var(--bg);cursor:pointer}
+.wl button:hover{border-color:var(--accent)}
+.wl .sc{width:40px;height:40px;border-radius:8px;display:grid;place-items:center;color:#fff;font-family:var(--font-display);font-weight:700;font-size:17px}
+.wl .t b{display:block}
+.wl .t small{color:var(--muted)}
+.wl .r{text-align:right;font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+.toast{position:fixed;z-index:2000;left:50%;bottom:calc(20px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--fg);color:var(--bg);padding:8px 14px;border-radius:999px;font-size:13px;box-shadow:0 6px 20px rgb(0 0 0/.25)}
+@media (max-width:760px){
+  .app{grid-template-columns:1fr;grid-template-rows:auto 48% 1fr}
+  aside.panel{border-left:0;border-top:1px solid var(--line)}
+  .legend{display:none}
+  .search{max-width:none;flex-basis:100%}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+.acct{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--muted)}
+.acct button{border:0;background:none;color:var(--pine);cursor:pointer;padding:2px 4px;font-size:12.5px}
+.login{display:grid;gap:10px;padding:14px;border:1px solid var(--line);border-radius:var(--r);background:var(--bg);margin-bottom:14px}
+.login h2{font-family:var(--font-display);font-size:18px;margin:0}
+.login p{margin:0;color:var(--muted);font-size:13px}
+.login .err{color:var(--bad);font-size:12.5px}
+.leaflet-control-attribution{font-size:10px}
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="top">
+    <div class="brand"><h1>DGM Property Map</h1><span>Downtown Moscow, Idaho · commercial parcels</span></div>
+    <div class="search">
+      <input id="q" type="search" placeholder="Search address, owner or parcel ID" autocomplete="off" aria-label="Search parcels">
+      <div class="results" id="results" hidden></div>
+    </div>
+    <div class="acct" id="acct"></div>
+  </header>
+  <div class="mapwrap">
+    <div id="map" aria-label="Map of downtown Moscow parcels"></div>
+    <div class="mapctl">
+      <div class="chipbar" role="group" aria-label="Map layers">
+        <button id="tAerial" aria-pressed="true">Aerial</button>
+        <button id="tComm" aria-pressed="true">Commercial</button>
+        <button id="tStreets" aria-pressed="true">Streets</button>
+      </div>
+      <div class="legend" aria-label="Legend">
+        <b>Feasibility score</b>
+        <span><i style="background:var(--good)"></i>4–5 strong</span>
+        <span><i style="background:var(--warn)"></i>3 possible</span>
+        <span><i style="background:var(--bad)"></i>1–2 weak</span>
+        <span><i style="background:var(--surface-2);border-color:var(--muted);border-style:dashed"></i>Watching, not scored</span>
+        <span><i style="background:rgb(224 180 74/.35);border-color:#e0b44a"></i>Commercial use code</span>
+      </div>
+    </div>
+    <div class="credit" id="credit">Parcels: Latah County GIS</div>
+  </div>
+  <aside class="panel">
+    <div class="tabs" role="tablist">
+      <button role="tab" id="tabP" aria-selected="true">Parcel</button>
+      <button role="tab" id="tabW" aria-selected="false">Watchlist<span class="count" id="wlCount">0</span></button>
+    </div>
+    <div class="pane" id="pane"></div>
+  </aside>
+</div>
+<div class="toast" id="toast" hidden></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
+<script>
+(function(){
+"use strict";
+/* ===== SETUP: paste your Apps Script web app URL between the quotes ===== */
+const API_URL = "https://script.google.com/macros/s/AKfycbxYOjlbFe_OmtUdYJrmiYEqUrRDQ7CeXddEsQ-l_EjsXZ_NltN98v7iLb5aDU_4RrSD/exec";
+/* ======================================================================= */
+const SNAPSHOT_DATE = "Oct 30, 2026";
+const COUNTY_URL = "https://gis.latah.id.us/arcgis/rest/services/Parcels1/MapServer/0/query";
+const BOUNDS = [[46.7270,-117.0040],[46.7373,-116.9965]];
+const COMMERCIAL = new Set(["OF","RE","RT","MX","BK","SM","GR","GS","WH","RS","MO","MS"]);
+const USE_LABEL = {OF:"Office",RE:"Retail",RT:"Restaurant",MX:"Mixed use",BK:"Bank",GS:"Service station",WH:"Warehouse",AP:"Apartments",C:"Exempt"};
+const STAGES = ["Watching","Researching","Owner contacted","Owner interested","Analyzing deal","Offer made","Under contract","Acquired","Passed"];
+const CRITERIA = [
+  {k:"price", t:"Price vs. value", h:"Asking price against assessed value and $/sq ft"},
+  {k:"cond",  t:"Building condition", h:"Remediation risk: roof, structure, systems, hazmat"},
+  {k:"afford",t:"Tenant affordability", h:"Can we lease at rates local businesses can pay?"},
+  {k:"owner", t:"Owner willingness", h:"Likelihood the owner sells on workable terms"},
+  {k:"impact",t:"Community impact", h:"Location, frontage, and value to downtown"}
+];
+
+// ---------- state ----------
+let parcels = [], byId = new Map(), props = {}, notes = [], auth = null, canWrite = false, syncErr = "", loginErr = "", busy = false, liveCounty = false;
+let selected = null, draft = null, dirty = false, remoteChanged = false, tab = "p", confirmRemove = false, wlSort = "score";
+const $ = s => document.querySelector(s);
+const pane = $("#pane");
+
+// ---------- helpers ----------
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const money = v => (v || v === 0) && !isNaN(v) ? "$" + Math.round(+v).toLocaleString() : "—";
+const money2 = v => isFinite(v) ? "$" + (+v).toFixed(2) : "—";
+const n0 = v => (v || v === 0) && !isNaN(v) ? Math.round(+v).toLocaleString() : "—";
+const ymd = v => { if (!v) return "—"; const s = String(v); return new Date(+s.slice(0,4), +s.slice(4,6)-1, +s.slice(6,8)).toLocaleDateString(undefined,{year:"numeric",month:"short",day:"numeric"}); };
+const tidyAddr = a => (a || "").replace(/\bWASHINGTO\b/,"WASHINGTON").replace(/\bWASHING\b/,"WASHINGTON");
+const title = s => (s || "").toLowerCase().replace(/\b([a-z])/g, m => m.toUpperCase()).replace(/\b(Llc|Lp|Inc|Na|Ii|Iii)\b/g, m => m.toUpperCase()).replace(/\bN\.a\./i,"N.A.");
+function toast(msg){ const t = $("#toast"); t.textContent = msg; t.hidden = false; clearTimeout(toast.h); toast.h = setTimeout(() => t.hidden = true, 2200); }
+function scoreOf(p){ const s = p && p.score; if (!s) return null; const v = CRITERIA.map(c => s[c.k]).filter(x => x >= 1); return v.length ? v.reduce((a,b)=>a+b,0)/v.length : null; }
+function scoreColor(v){ const cs = getComputedStyle(document.documentElement); if (v == null) return cs.getPropertyValue("--none").trim(); return cs.getPropertyValue(v >= 3.5 ? "--good" : v >= 2.5 ? "--warn" : "--bad").trim(); }
+function cssv(n){ return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }
+
+// ---------- map ----------
+const map = L.map("map", {preferCanvas:true, zoomSnap:0.25, minZoom:15.5, maxZoom:21, maxBounds:L.latLngBounds(BOUNDS).pad(0.6), attributionControl:false, zoomControl:true});
+map.fitBounds([[46.7292,-117.0022],[46.7360,-116.9985]]);
+const aerial = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {maxNativeZoom:19, maxZoom:21, attribution:"Imagery © Esri, Maxar, Earthstar Geographics"}).addTo(map);
+L.control.attribution({prefix:false, position:"bottomright"}).addTo(map);
+const parcelLayer = L.layerGroup().addTo(map);
+const streetLayer = L.layerGroup().addTo(map);
+let showComm = true;
+
+function styleFor(p){
+  const t = props[p.id], sel = selected && selected.id === p.id;
+  if (t){
+    const v = scoreOf(t);
+    if (v == null) return {color:"#ffffff", weight:sel?4:2.5, dashArray:"6 4", fillColor:"#ffffff", fillOpacity:sel?0.3:0.15};
+    const c = scoreColor(v);
+    return {color:sel?"#ffffff":c, weight:sel?4:2.5, dashArray:null, fillColor:c, fillOpacity:0.45};
+  }
+  if (sel) return {color:"#ffffff", weight:4, dashArray:null, fillColor:"#ffffff", fillOpacity:0.2};
+  if (showComm && COMMERCIAL.has(p.uc)) return {color:"#e0b44a", weight:1.6, dashArray:null, fillColor:"#e0b44a", fillOpacity:0.22};
+  return {color:"rgba(255,255,255,0.75)", weight:1, dashArray:null, fillColor:"#000", fillOpacity:0.01};
+}
+function restyle(){ parcels.forEach(p => p.layer && p.layer.setStyle(styleFor(p))); }
+
+function decode(g){ return g.map(r => r.map(([x,y]) => [46 + y/1e5, -117 + x/1e5])); }
+function areaSqft(rings){
+  let tot = 0;
+  rings.forEach((r,i) => { const lat0 = r[0][0]*Math.PI/180; let a = 0;
+    for (let j=0;j<r.length;j++){ const [y1,x1] = r[j], [y2,x2] = r[(j+1)%r.length];
+      a += (x1*Math.cos(lat0)*111320)*(y2*110540) - (x2*Math.cos(lat0)*111320)*(y1*110540); }
+    tot += (i===0?1:-1)*Math.abs(a/2); });
+  return tot * 10.7639;
+}
+function shortSt(n){ return (n||"").replace(/^North /,"N ").replace(/^South /,"S ").replace(/^East /,"E ").replace(/^West /,"W ").replace(/ Street$/," St").replace(/ Avenue$/," Ave").replace(/ Boulevard$/," Blvd"); }
+
+function buildParcels(list){
+  parcelLayer.clearLayers(); byId.clear();
+  parcels = list.map(p => { p.ll = decode(p.g); p.ad = tidyAddr(p.ad); p.sqftLot = areaSqft(p.ll); return p; });
+  parcels.forEach(p => {
+    byId.set(p.id, p);
+    p.layer = L.polygon(p.ll, styleFor(p)).addTo(parcelLayer);
+    p.layer.bindTooltip(() => `<b>${esc(p.ad || p.id)}</b><br>${esc(title(p.ow))}`, {sticky:true, className:"ptip", direction:"top"});
+    p.layer.on("click", () => select(p.id, false));
+  });
+  if (selected){ const again = byId.get(selected.id); if (again){ selected = again; again.layer.setStyle(styleFor(again)); again.layer.bringToFront(); } }
+}
+function buildMap(data){
+  buildParcels(data.p);
+  // street labels: longest segment per name
+  const best = {};
+  data.s.forEach(s => { const pts = decode(s.g)[0]; if (!pts || pts.length < 2 || !s.n) return;
+    const len = Math.hypot(pts[0][0]-pts.at(-1)[0], (pts[0][1]-pts.at(-1)[1])*0.69);
+    const key = s.n; if (!best[key]) best[key] = [];
+    best[key].push({pts,len}); });
+  Object.entries(best).forEach(([n, segs]) => {
+    segs.sort((a,b) => b.len - a.len);
+    segs.slice(0, segs.length > 4 ? 2 : 1).forEach(({pts}) => {
+      const a = pts[0], b = pts.at(-1), mid = [(a[0]+b[0])/2, (a[1]+b[1])/2];
+      let ang = Math.atan2(-(b[0]-a[0]), (b[1]-a[1])*0.686) * 180/Math.PI;
+      if (ang > 90) ang -= 180; if (ang < -90) ang += 180;
+      L.marker(mid, {interactive:false, keyboard:false, icon:L.divIcon({className:"", iconSize:[0,0],
+        html:`<div class="st-label" style="transform:translate(-50%,-50%) rotate(${ang.toFixed(1)}deg)">${esc(shortSt(n))}</div>`})}).addTo(streetLayer);
+    });
+  });
+  const updLabels = () => { const on = $("#tStreets").getAttribute("aria-pressed") === "true" && map.getZoom() >= 16.75;
+    if (on && !map.hasLayer(streetLayer)) streetLayer.addTo(map); if (!on && map.hasLayer(streetLayer)) map.removeLayer(streetLayer); };
+  map.on("zoomend", updLabels); updLabels(); buildMap.updLabels = updLabels;
+}
+
+function toggle(btn, fn){ btn.addEventListener("click", () => { const on = btn.getAttribute("aria-pressed") !== "true"; btn.setAttribute("aria-pressed", on); fn(on); }); }
+toggle($("#tAerial"), on => on ? aerial.addTo(map) : map.removeLayer(aerial));
+toggle($("#tComm"), on => { showComm = on; restyle(); });
+toggle($("#tStreets"), () => buildMap.updLabels && buildMap.updLabels());
+
+// ---------- search ----------
+$("#q").addEventListener("input", e => {
+  const q = e.target.value.trim().toUpperCase(), box = $("#results");
+  if (q.length < 2){ box.hidden = true; return; }
+  const hits = parcels.filter(p => (p.ad||"").includes(q) || (p.ow||"").includes(q) || p.id.includes(q)).slice(0, 12);
+  box.innerHTML = hits.length ? hits.map(p => `<button data-id="${esc(p.id)}">${esc(p.ad || p.id)}<small>${esc(title(p.ow))}${props[p.id] ? " · on watchlist" : ""}</small></button>`).join("") : `<button disabled>No parcels match “${esc(e.target.value)}”<small>Search covers downtown parcels in the county snapshot.</small></button>`;
+  box.hidden = false;
+});
+$("#results").addEventListener("click", e => { const b = e.target.closest("button[data-id]"); if (!b) return; $("#results").hidden = true; $("#q").value = ""; select(b.dataset.id, true); });
+document.addEventListener("click", e => { if (!e.target.closest(".search")) $("#results").hidden = true; });
+
+// ---------- selection ----------
+function select(id, fly){
+  const p = byId.get(id); if (!p) return;
+  if (dirty && selected && selected.id !== id && !confirm_discard()) return;
+  const prev = selected; selected = p; dirty = false; remoteChanged = false; confirmRemove = false;
+  draft = props[id] ? structuredClone(props[id]) : null;
+  if (prev && prev.layer) prev.layer.setStyle(styleFor(prev));
+  p.layer.setStyle(styleFor(p)); p.layer.bringToFront();
+  if (fly) map.flyToBounds(p.layer.getBounds(), {maxZoom: map.getSize().x < 600 ? 18.5 : 19.5, padding:[60,60], duration:0.6});
+  if (location.hash.slice(1) !== id) history.replaceState(null, "", "#" + id);
+  setTab("p");
+}
+function confirm_discard(){ toast("Save or discard your changes first"); return false; }
+window.addEventListener("hashchange", () => { const id = location.hash.slice(1); if (id && byId.has(id) && (!selected || selected.id !== id)) select(id, true); });
+
+// ---------- tabs ----------
+function setTab(t){ tab = t; $("#tabP").setAttribute("aria-selected", t === "p"); $("#tabW").setAttribute("aria-selected", t === "w"); render(); }
+$("#tabP").onclick = () => setTab("p");
+$("#tabW").onclick = () => setTab("w");
+
+// ---------- rendering ----------
+let names = {};
+
+const who = n => n ? (auth && n === auth.name ? "you" : n) : "someone";
+function when(ts){ if (!ts) return ""; const d = new Date(ts); return d.toLocaleDateString(undefined,{month:"short",day:"numeric",year:"numeric"}); }
+
+function render(keepScroll){
+  const st = pane.scrollTop;
+  $("#wlCount").textContent = Object.keys(props).length;
+  if (tab === "w") renderWatch(); else renderParcel();
+  if (keepScroll) pane.scrollTop = st;
+  const lg = $("#loginGo"); if (lg){ lg.onclick = login; $("#loginPass").onkeydown = e => { if (e.key === "Enter") login(); }; }
+  $("#acct").innerHTML = auth ? `<span>${esc(auth.name)}</span><button id="signOut">Sign out</button>` : "";
+  const so = $("#signOut"); if (so) so.onclick = () => signOut("");
+}
+
+function apiReady(){ return API_URL && !API_URL.startsWith("PASTE"); }
+function modeBanner(){
+  if (!apiReady()) return `<div class="banner">This page isn’t connected to the group spreadsheet yet. Paste the Apps Script web app URL into the API_URL line at the top of the page’s script (see the Read Me tab in the spreadsheet).</div>`;
+  if (!auth) return `<div class="login"><h2>Group sign-in</h2><p>Enter your name and the DGM passphrase to see and edit the group’s watchlist. County parcel data is visible without signing in.</p>
+    <div class="f"><label for="loginName">Your name</label><input id="loginName" autocomplete="name" placeholder="First and last name"></div>
+    <div class="f"><label for="loginPass">Passphrase</label><input id="loginPass" type="password" autocomplete="current-password"></div>
+    ${loginErr ? `<div class="err">${esc(loginErr)}</div>` : ""}
+    <div><button class="btn primary" id="loginGo">Sign in</button></div></div>`;
+  if (syncErr) return `<div class="banner">${esc(syncErr)}</div>`;
+  return "";
+}
+
+function renderParcel(){
+  if (!selected){
+    const n = parcels.filter(p => COMMERCIAL.has(p.uc)).length;
+    pane.innerHTML = modeBanner() + `<div class="empty"><h2>Pick a parcel</h2>
+      <p>Click any lot on the map, or search by address or owner. Gold outlines mark the ${n} parcels the county codes as commercial use.</p>
+      <p>Each parcel shows the county’s ownership, assessed value and tax record. Add it to the watchlist to track lease rates, tenants, contacts and the group’s feasibility score.</p>
+      <p class="note-src">${liveCounty ? "County data loaded live from Latah County GIS." : "County data snapshot from " + SNAPSHOT_DATE + "."} ${parcels.length} parcels between D St and 8th St.</p></div>`;
+    return;
+  }
+  const p = selected, t = props[p.id], d = draft, sc = scoreOf(d || t);
+  const centroid = p.layer.getBounds().getCenter();
+  const mail = [title(p.m1), [title(p.mc), p.ms, p.mz].filter(Boolean).join(" ")].filter(Boolean).join(", ");
+  let h = modeBanner();
+  h += `<div class="ph"><div><h2>${esc(title(p.ad) || "No site address")}</h2><div class="own">${esc(title(p.ow) || "Owner not listed")}</div></div>`;
+  if (t) h += `<div class="score-badge" style="background:${sc==null?cssv("--none"):scoreColor(sc)}"><div>${sc==null?"–":sc.toFixed(1)}<small>score</small></div></div>`;
+  h += `</div><div class="chips">`;
+  if (t) h += `<span class="chip stage">${esc(t.stage || "Watching")}</span>`;
+  if (p.uc) h += `<span class="chip">${esc(USE_LABEL[p.uc] ? USE_LABEL[p.uc] + " (" + p.uc + ")" : "Use code " + p.uc)}</span>`;
+  h += `<span class="chip mono">${esc(p.id)}</span></div>`;
+
+  h += `<section class="blk"><h3>County record</h3><dl class="kv">
+    <dt>Owner of record</dt><dd>${esc(title(p.ow) || "—")}</dd>
+    <dt>Mailing address</dt><dd>${esc(mail || "—")}</dd>
+    <dt>Assessed value</dt><dd class="num">${money(p.tv)}</dd>
+    <dt>Property tax</dt><dd class="num">${p.tx ? money(p.tx) + " / yr" : "—"}</dd>
+    <dt>Last deed recorded</dt><dd>${ymd(p.dd)}</dd>
+    <dt>Building sq ft</dt><dd class="num">${p.sf ? n0(p.sf) : "Not in county record"}</dd>
+    <dt>Year built</dt><dd class="num">${p.yb || "—"}</dd>
+    <dt>Lot size</dt><dd class="num">${n0(p.sqftLot)} sq ft</dd>
+    ${p.tv && p.sqftLot ? `<dt>Assessed per lot sq ft</dt><dd class="num">${money2(p.tv/p.sqftLot)}</dd>` : ""}
+  </dl>
+  <div class="links">
+    <a class="lk" href="https://www.google.com/maps/search/?api=1&query=${centroid.lat.toFixed(6)},${centroid.lng.toFixed(6)}" target="_blank" rel="noopener">Google Maps</a>
+    <a class="lk" href="https://gis.latah.id.us/publicmap/index.html" target="_blank" rel="noopener">Latah County map</a>
+    <button class="lk" id="copyLink">Copy parcel link</button>
+    ${mail ? `<button class="lk" id="copyMail">Copy mailing address</button>` : ""}
+  </div>
+  <div class="note-src">From Latah County GIS${liveCounty ? ", loaded live" : ", snapshot " + SNAPSHOT_DATE}. Lot size is measured from the parcel outline.</div></section>`;
+
+  if (!t){
+    h += `<section class="blk"><h3>Group tracking</h3>`;
+    h += canWrite ? `<p>Not on the watchlist yet. Add it to record lease rates, tenants, owner contacts and a feasibility score the whole group can see.</p><button class="btn primary" id="track">Add to watchlist</button>`
+                  : `<p class="note-src">Not on the group’s watchlist.</p>`;
+    h += `</section>`;
+    pane.innerHTML = h; wireCommon(p, mail);
+    const tr = $("#track"); if (tr) tr.onclick = addTrack;
+    return;
+  }
+  h += trackForm(d, p);
+  pane.innerHTML = h; wireCommon(p, mail); wireForm(p);
+}
+
+function wireCommon(p, mail){
+  const copy = (txt, msg) => { try { navigator.clipboard.writeText(txt).then(() => toast(msg), () => toast("Couldn’t copy. Select the text instead.")); } catch(e){ toast("Couldn’t copy. Select the text instead."); } };
+  $("#copyLink").onclick = () => copy(location.href.split("#")[0] + "#" + p.id, "Parcel link copied");
+  const cm = $("#copyMail"); if (cm) cm.onclick = () => copy(title(p.ow) + "\n" + mail, "Mailing address copied");
+}
+
+function fld(label, key, val, type, opts){
+  const dis = canWrite ? "" : "disabled";
+  if (type === "select") return `<div class="f"><label for="f_${key}">${label}</label><select id="f_${key}" data-k="${key}" ${dis}>${opts.map(o => `<option ${o===val?"selected":""}>${esc(o)}</option>`).join("")}</select></div>`;
+  return `<div class="f ${type==="textarea"?"full":""}"><label for="f_${key}">${label}</label>${type==="textarea"
+    ? `<textarea id="f_${key}" data-k="${key}" ${dis}>${esc(val)}</textarea>`
+    : `<input id="f_${key}" data-k="${key}" type="${type||"text"}" ${type==="number"?'step="any" inputmode="decimal"':""} value="${esc(val)}" ${dis}>`}</div>`;
+}
+
+function trackForm(d, p){
+  const dis = canWrite ? "" : "disabled";
+  const s = d.score || {}, c = d.contact || {}, k = d.calc || {};
+  let h = "";
+  if (remoteChanged) h += `<div class="banner">Someone else just saved changes to this property. <button class="lk" id="loadRemote">Load their version</button> (your unsaved edits will be replaced)</div>`;
+  h += `<section class="blk"><h3>Deal basics</h3><div class="fgrid">
+    ${fld("Stage","stage",d.stage||"Watching","select",STAGES)}
+    ${fld("Market status","market",d.market||"Unknown","select",["Unknown","Not listed","Listed for sale","Off-market interest","Recently sold"])}
+    ${fld("Asking price ($)","asking",d.asking??"","number")}
+    ${fld("Our value estimate ($)","valueEst",d.valueEst??"","number")}
+    ${fld("Leasable sq ft","sfLease",d.sfLease??(p.sf||""),"number")}
+    ${fld("Current lease rate ($/sf/mo)","rate",d.rate??"","number")}
+    ${fld("Lease type","leaseType",d.leaseType||"Unknown","select",["Unknown","NNN","Modified gross","Gross"])}
+    ${fld("Annual insurance est. ($)","ins",d.ins??"","number")}
+  </div></section>`;
+
+  h += `<section class="blk"><h3>Feasibility scorecard<span class="sp"></span><small style="text-transform:none;letter-spacing:0">1 weak · 5 strong</small></h3>`;
+  CRITERIA.forEach(cr => {
+    const v = s[cr.k] || 0;
+    h += `<div class="crit"><div class="top"><div><b>${cr.t}</b><br><small>${cr.h}</small></div><div class="dots" role="group" aria-label="${cr.t} score">`;
+    for (let i=1;i<=5;i++) h += `<button data-crit="${cr.k}" data-v="${i}" aria-pressed="${v===i}" ${dis} style="${v===i?`background:${scoreColor(i)}`:""}">${i}</button>`;
+    h += `</div></div><input data-critnote="${cr.k}" placeholder="Why this score?" value="${esc((d.scoreNotes||{})[cr.k])}" aria-label="${cr.t} note" ${dis}></div>`;
+  });
+  const sc = scoreOf(d);
+  h += `<div class="overall"><span class="big" style="color:${sc==null?"var(--muted)":scoreColor(sc)}">${sc==null?"–":sc.toFixed(1)}</span><span>${sc==null?"Score at least one criterion to color this parcel on the map.":`Average of ${CRITERIA.filter(c=>s[c.k]>=1).length} of 5 criteria`}</span></div></section>`;
+
+  h += `<section class="blk"><h3>Owner contact</h3><div class="fgrid">
+    ${fld("Contact name","c_name",c.name||"")}
+    ${fld("Role","c_role",c.role||"","text")}
+    ${fld("Phone","c_phone",c.phone||"","tel")}
+    ${fld("Email","c_email",c.email||"","email")}
+    ${fld("Contact notes","c_note",c.note||"","textarea")}
+  </div></section>`;
+
+  h += `<section class="blk"><h3>Tenants<span class="sp"></span>${canWrite?`<button class="lk" id="addTen">Add tenant</button>`:""}</h3><div class="rows" id="tenRows">`;
+  (d.tenants||[]).forEach((r,i) => h += `<div class="row" data-list="tenants" data-i="${i}">
+      <input class="wide" data-f="name" placeholder="Business" value="${esc(r.name)}" aria-label="Tenant business" ${dis}>
+      ${canWrite?`<button class="x" data-del="tenants" data-i="${i}" aria-label="Remove tenant">×</button>`:""}
+      <input data-f="sf" placeholder="Sq ft" inputmode="decimal" value="${esc(r.sf)}" aria-label="Tenant sq ft" ${dis}>
+      <input data-f="rate" placeholder="$/sf/mo" inputmode="decimal" value="${esc(r.rate)}" aria-label="Tenant rate" ${dis}>
+      <input data-f="ends" placeholder="Lease ends" value="${esc(r.ends)}" aria-label="Lease end" ${dis}>
+      <input data-f="note" placeholder="Notes" value="${esc(r.note)}" aria-label="Tenant notes" ${dis}></div>`);
+  if (!(d.tenants||[]).length) h += `<p class="note-src">No tenants recorded.</p>`;
+  h += `</div></section>`;
+
+  h += `<section class="blk"><h3>Sales &amp; listing history<span class="sp"></span>${canWrite?`<button class="lk" id="addSale">Add entry</button>`:""}</h3><div class="rows">`;
+  (d.sales||[]).forEach((r,i) => h += `<div class="row" data-list="sales" data-i="${i}">
+      <input data-f="date" placeholder="Date" value="${esc(r.date)}" aria-label="Sale date" ${dis}>
+      <input data-f="price" placeholder="Price" inputmode="decimal" value="${esc(r.price)}" aria-label="Sale price" ${dis}>
+      ${canWrite?`<button class="x" data-del="sales" data-i="${i}" aria-label="Remove entry">×</button>`:""}
+      <input class="wide" data-f="note" placeholder="What happened (sold, listed, offer…)" value="${esc(r.note)}" aria-label="Entry notes" ${dis}></div>`);
+  if (p.dd) h += `<p class="note-src">County shows the last deed recorded ${ymd(p.dd)}.</p>`;
+  h += `</div></section>`;
+
+  const price = +d.asking || 0, sf = +d.sfLease || 0, down = k.down ?? 30, rate = k.rate ?? 6, yrs = k.yrs ?? 30;
+  const loan = price*(1-down/100), r = rate/1200, n = yrs*12, pi = loan && r ? loan*r/(1-Math.pow(1+r,-n)) : loan/n;
+  const nnnMo = ((p.tx||0) + (+d.ins||0))/12;
+  h += `<section class="blk"><h3>Quick math</h3><div class="calc">
+    <div class="f"><label for="k_down">Down %</label><input id="k_down" data-calc="down" type="number" step="any" value="${down}" ${dis}></div>
+    <div class="f"><label for="k_rate">Rate %</label><input id="k_rate" data-calc="rate" type="number" step="any" value="${rate}" ${dis}></div>
+    <div class="f"><label for="k_yrs">Years</label><input id="k_yrs" data-calc="yrs" type="number" step="1" value="${yrs}" ${dis}></div>
+    <div class="out">${price && sf ? `
+      <span>Down payment</span><b>${money(price*down/100)}</b>
+      <span>Per investor (11)</span><b>${money(price*down/100/11)}</b>
+      <span>Monthly P&amp;I</span><b>${money(pi)}</b>
+      <span>Break-even base rent (NNN)</span><b>${money2(pi/sf)}/sf/mo</b>
+      <span>Tax + insurance pass-through</span><b>${money2(nnnMo/sf)}/sf/mo</b>
+      <span>Tenant total at break-even</span><b>${money2((pi+nnnMo)/sf)}/sf/mo</b>
+      ${d.rate ? `<span>Current rate vs. break-even</span><b>${(+d.rate >= (pi/sf) ? "+" : "") + money2(+d.rate - pi/sf).replace("$-","−$")}</b>` : ""}`
+      : `<span style="grid-column:1/-1;color:var(--muted)">Enter an asking price and leasable sq ft to see the break-even lease rate.</span>`}</div>
+  </div></section>`;
+
+  h += `<section class="blk"><h3>Discussion</h3><div class="notes">`;
+  const ns = notes.filter(x => x.pid === p.id).sort((a,b) => (a.at||0) - (b.at||0));
+  ns.forEach(x => h += `<div class="n"><header><b>${esc(who(x.by))}</b><span>${when(x.at)}</span></header><p>${esc(x.text)}</p></div>`);
+  if (!ns.length) h += `<p class="note-src">No notes yet.</p>`;
+  h += `</div>${canWrite ? `<div class="addnote"><textarea id="noteText" placeholder="Add a note for the group"></textarea><button class="btn" id="noteAdd">Post</button></div>` : ""}</section>`;
+
+  if (canWrite){
+    h += `<div class="savebar"><div class="meta">${dirty ? "Unsaved changes" : (props[p.id].updatedAt ? `Saved by ${esc(who(props[p.id].updatedBy))} on ${when(props[p.id].updatedAt)}` : "Saved")}</div>`;
+    if (confirmRemove) h += `<div class="confirm">Remove from watchlist? <button class="btn danger" id="rmYes">Remove</button><button class="btn ghost" id="rmNo">Keep</button></div>`;
+    else h += `<button class="btn ghost" id="rm">Remove</button>${dirty?`<button class="btn" id="discard">Discard</button>`:""}<button class="btn primary" id="save" ${dirty?"":"disabled"}>Save</button>`;
+    h += `</div>`;
+  } else if (props[p.id].updatedAt) h += `<p class="note-src">Last saved by ${esc(who(props[p.id].updatedBy))} on ${when(props[p.id].updatedAt)}.</p>`;
+  return h;
+}
+
+function markDirty(){ if (!dirty){ dirty = true; const m = pane.querySelector(".savebar .meta"); if (m) m.textContent = "Unsaved changes"; const s = $("#save"); if (s) s.disabled = false;
+  if (!$("#discard") && $("#save")){ const b = document.createElement("button"); b.className="btn"; b.id="discard"; b.textContent="Discard"; b.onclick=discard; $("#save").before(b); } } }
+function discard(){ draft = structuredClone(props[selected.id]); dirty = false; remoteChanged = false; render(true); }
+
+function wireForm(p){
+  pane.querySelectorAll("[data-k]").forEach(el => el.addEventListener("input", () => {
+    const k = el.dataset.k, v = el.value;
+    if (k.startsWith("c_")){ draft.contact = draft.contact || {}; draft.contact[k.slice(2)] = v; }
+    else if (["asking","valueEst","sfLease","rate","ins"].includes(k)) draft[k] = v === "" ? null : +v;
+    else draft[k] = v;
+    markDirty();
+    if (["asking","sfLease","rate","ins"].includes(k)) refreshCalc();
+  }));
+  pane.querySelectorAll("[data-calc]").forEach(el => el.addEventListener("input", () => { draft.calc = draft.calc || {}; draft.calc[el.dataset.calc] = el.value === "" ? null : +el.value; markDirty(); refreshCalc(); }));
+  pane.querySelectorAll("[data-crit]").forEach(b => b.onclick = () => { draft.score = draft.score || {}; const v = +b.dataset.v; draft.score[b.dataset.crit] = draft.score[b.dataset.crit] === v ? null : v; markDirty(); render(true); });
+  pane.querySelectorAll("[data-critnote]").forEach(el => el.addEventListener("input", () => { draft.scoreNotes = draft.scoreNotes || {}; draft.scoreNotes[el.dataset.critnote] = el.value; markDirty(); }));
+  pane.querySelectorAll(".row[data-list] input").forEach(el => el.addEventListener("input", () => { const row = el.closest(".row"); draft[row.dataset.list][+row.dataset.i][el.dataset.f] = el.value; markDirty(); }));
+  pane.querySelectorAll("[data-del]").forEach(b => b.onclick = () => { draft[b.dataset.del].splice(+b.dataset.i, 1); markDirty(); render(true); });
+  const at = $("#addTen"); if (at) at.onclick = () => { (draft.tenants = draft.tenants || []).push({name:"",sf:"",rate:"",ends:"",note:""}); markDirty(); render(true); };
+  const as = $("#addSale"); if (as) as.onclick = () => { (draft.sales = draft.sales || []).push({date:"",price:"",note:""}); markDirty(); render(true); };
+  const sv = $("#save"); if (sv) sv.onclick = save;
+  const dc = $("#discard"); if (dc) dc.onclick = discard;
+  const lr = $("#loadRemote"); if (lr) lr.onclick = discard;
+  const rm = $("#rm"); if (rm) rm.onclick = () => { confirmRemove = true; render(true); };
+  const rn = $("#rmNo"); if (rn) rn.onclick = () => { confirmRemove = false; render(true); };
+  const ry = $("#rmYes"); if (ry) ry.onclick = removeTrack;
+  const na = $("#noteAdd"); if (na) na.onclick = addNote;
+}
+function refreshCalc(){ // re-render only the calc block output to keep focus
+  const tmp = document.createElement("div"); tmp.innerHTML = trackForm(draft, selected);
+  const fresh = tmp.querySelector(".calc .out"), cur = pane.querySelector(".calc .out"); if (fresh && cur) cur.replaceWith(fresh);
+}
+
+function renderWatch(){
+  const ids = Object.keys(props);
+  let h = modeBanner();
+  if (!ids.length && !auth){ pane.innerHTML = h; return; }
+  if (!ids.length){ pane.innerHTML = h + `<div class="empty"><h2>No properties yet</h2><p>Select a parcel on the map and choose “Add to watchlist”. Everything the group records shows up here, ranked by feasibility score.</p></div>`; return; }
+  const rows = ids.map(id => ({id, t:props[id], p:byId.get(id), s:scoreOf(props[id])}));
+  rows.sort((a,b) => wlSort === "score" ? (b.s ?? -1) - (a.s ?? -1)
+    : wlSort === "stage" ? STAGES.indexOf(a.t.stage||"Watching") - STAGES.indexOf(b.t.stage||"Watching")
+    : (b.t.updatedAt||0) - (a.t.updatedAt||0));
+  h += `<div class="wlbar"><label for="wlSort">Sort by</label><select id="wlSort"><option value="score" ${wlSort==="score"?"selected":""}>Feasibility score</option><option value="stage" ${wlSort==="stage"?"selected":""}>Stage</option><option value="updated" ${wlSort==="updated"?"selected":""}>Recently updated</option></select></div><div class="wl">`;
+  rows.forEach(({id,t,p,s}) => {
+    const ppsf = t.asking && t.sfLease ? money(t.asking/t.sfLease) + "/sf" : "";
+    h += `<button data-id="${esc(id)}"><span class="sc" style="background:${s==null?cssv("--none"):scoreColor(s)}">${s==null?"–":s.toFixed(1)}</span>
+      <span class="t"><b>${esc(title(p ? p.ad : id))}</b><small>${esc(t.stage||"Watching")} · ${esc(title(p ? p.ow : ""))}</small></span>
+      <span class="r">${t.asking ? money(t.asking) : (p && p.tv ? money(p.tv) + "<br>assessed" : "")}${ppsf ? "<br>" + ppsf : ""}</span></button>`;
+  });
+  pane.innerHTML = h + `</div>`;
+  $("#wlSort").onchange = e => { wlSort = e.target.value; render(); };
+  pane.querySelectorAll(".wl button").forEach(b => b.onclick = () => select(b.dataset.id, true));
+}
+
+// ---------- group spreadsheet API ----------
+async function api(action, payload){
+  let r;
+  try {
+    r = await fetch(API_URL, {method:"POST", headers:{"Content-Type":"text/plain;charset=utf-8"},
+      body: JSON.stringify(Object.assign({action, pass:auth ? auth.pass : "", by:auth ? auth.name : ""}, payload || {}))});
+  } catch(e){ const er = new Error("offline"); er.code = "unavailable"; throw er; }
+  if (!r.ok){ const er = new Error("http"); er.code = "unavailable"; throw er; }
+  const j = await r.json();
+  if (!j.ok){ const er = new Error(j.error || "error"); er.code = j.error; er.current = j.current; throw er; }
+  return j;
+}
+function store(v){ try { v ? localStorage.setItem("dgm-auth", JSON.stringify(v)) : localStorage.removeItem("dgm-auth"); } catch(e){} }
+function loadStored(){ try { return JSON.parse(localStorage.getItem("dgm-auth") || "null"); } catch(e){ return null; } }
+
+function applyData(d){
+  props = d.props || {}; notes = d.notes || [];
+  const sid = selected && selected.id;
+  if (sid && !dirty) draft = props[sid] ? structuredClone(props[sid]) : null;
+  restyle();
+  if (!dirty) render(true); else $("#wlCount").textContent = Object.keys(props).length;
+}
+async function sync(){
+  if (!auth || !apiReady()) return;
+  try { const j = await api("list"); syncErr = ""; applyData(j.data); }
+  catch(e){
+    if (e.code === "bad_passphrase") return signOut("That passphrase no longer works. Ask the group for the current one.");
+    syncErr = "Couldn’t reach the group spreadsheet. Changes won’t save until the connection is back.";
+    if (!dirty) render(true);
+  }
+}
+async function login(){
+  const name = $("#loginName").value.trim(), pass = $("#loginPass").value;
+  if (!name || !pass){ loginErr = "Enter your name and the passphrase."; return render(true); }
+  auth = {name, pass}; loginErr = "";
+  const b = $("#loginGo"); b.disabled = true; b.textContent = "Signing in…";
+  try { const j = await api("list"); store(auth); canWrite = true; syncErr = ""; toast("Signed in"); applyData(j.data); render(true); }
+  catch(e){ auth = null; canWrite = false; loginErr = e.code === "bad_passphrase" ? "That passphrase didn’t work. Check it with the group and try again." : "Couldn’t reach the group spreadsheet. Check your connection and try again."; render(true); }
+}
+function signOut(msg){
+  auth = null; canWrite = false; store(null); props = {}; notes = []; draft = null; dirty = false; loginErr = msg || ""; restyle(); render();
+}
+
+// ---------- writes ----------
+function setBusy(on, label){ busy = on; const s = $("#save"); if (s){ s.disabled = on || !dirty; if (label) s.textContent = on ? label : "Save"; } }
+async function addTrack(){
+  const p = selected, rec = {pid:p.id, addr:p.ad||"", owner:title(p.ow)||"", stage:"Watching", market:"Unknown", sfLease:p.sf||null, score:{}, scoreNotes:{}, contact:{}, tenants:[], sales:[], calc:{down:30,rate:6,yrs:30}};
+  const b = $("#track"); if (b){ b.disabled = true; b.textContent = "Adding…"; }
+  try { const j = await api("save", {record:rec, base:null}); props[p.id] = j.record; draft = structuredClone(j.record); dirty = false; toast("Added to watchlist"); render(); p.layer.setStyle(styleFor(p)); }
+  catch(e){ writeErr(e, p.id); if (b){ b.disabled = false; b.textContent = "Add to watchlist"; } }
+}
+async function save(){
+  const id = selected.id, rec = structuredClone(draft);
+  setBusy(true, "Saving…");
+  try { const j = await api("save", {record:rec, base:props[id] ? props[id].updatedAt : null}); props[id] = j.record; draft = structuredClone(j.record); dirty = false; remoteChanged = false; setBusy(false); toast("Saved"); render(true); selected.layer.setStyle(styleFor(selected)); }
+  catch(e){ setBusy(false, "Save"); writeErr(e, id); }
+}
+async function removeTrack(){
+  const id = selected.id;
+  try { await api("delete", {pid:id}); delete props[id]; draft = null; dirty = false; confirmRemove = false; toast("Removed from watchlist"); render(); selected.layer.setStyle(styleFor(selected)); }
+  catch(e){ writeErr(e, id); }
+}
+async function addNote(){
+  const ta = $("#noteText"), text = ta.value.trim(); if (!text) return;
+  const b = $("#noteAdd"); b.disabled = true;
+  try { const j = await api("note", {pid:selected.id, text}); notes.push(j.note); ta.value = ""; toast("Note posted");
+    const tmp = document.createElement("div"); tmp.innerHTML = trackForm(draft, selected);
+    const fresh = tmp.querySelector(".notes"), cur = pane.querySelector(".notes"); if (fresh && cur) cur.replaceWith(fresh); }
+  catch(e){ writeErr(e, selected.id); }
+  b.disabled = false;
+}
+function writeErr(e, id){
+  const c = e && e.code;
+  if (c === "conflict"){
+    if (e.current){ props[id] = e.current; }
+    remoteChanged = true; toast("Someone else saved this property first. Load their version, then redo your change.");
+    render(true); return;
+  }
+  if (c === "bad_passphrase") return signOut("That passphrase no longer works. Ask the group for the current one.");
+  toast(c === "unavailable" ? "Couldn’t reach the group spreadsheet. Check your connection and try again."
+      : c === "busy" ? "The spreadsheet is busy. Wait a few seconds and try again."
+      : "Save didn’t go through. Try again.");
+}
+
+// ---------- county parcels (live, with snapshot fallback) ----------
+async function loadCountyLive(){
+  const P = "GISParcels_dbo_pcparc00_", I = "GISParcels_dbo_pcimpc00_";
+  const flds = {id:"PARCEL_ID",ow:"PM_MAIL_NM",ad:P+"PM_PROP_AD",m1:P+"PM_MAIL_A1",mc:P+"PM_MAIL_CT",ms:P+"PM_MAIL_ST",mz:P+"PM_MAIL_ZP",uc:P+"PM_PARC_CD",tv:P+"PM_TOT_VAL",tx:P+"PM_TAX_AMT",dd:P+"PM_DEEDCDT",sf:I+"IM_TOT_SQF",yb:I+"IM_YR_BLT"};
+  const q = new URLSearchParams({where:"1=1", geometry:[BOUNDS[0][1],BOUNDS[0][0],BOUNDS[1][1],BOUNDS[1][0]].join(","), geometryType:"esriGeometryEnvelope", inSR:"4326", spatialRel:"esriSpatialRelIntersects", outFields:Object.values(flds).join(","), returnGeometry:"true", outSR:"4326", geometryPrecision:"6", f:"json"});
+  const ctl = new AbortController(); const to = setTimeout(() => ctl.abort(), 12000);
+  const j = await fetch(COUNTY_URL + "?" + q, {signal:ctl.signal}).then(r => r.json()); clearTimeout(to);
+  if (!j.features || !j.features.length) throw new Error("no features");
+  return j.features.map(f => { const o = {};
+    for (const [k,v] of Object.entries(flds)){ let x = f.attributes[v]; if (typeof x === "string") x = x.replace(/\s+/g," ").trim(); if (x !== null && x !== "" && x !== 0) o[k] = x; }
+    o.g = f.geometry.rings.map(r => r.map(([x,y]) => [Math.round((x+117)*1e5), Math.round((y-46)*1e5)])); return o; })
+    .filter(o => o.id).reduce((acc, o) => { const prev = acc.find(x => x.id === o.id); if (prev) prev.g = prev.g.concat(o.g); else acc.push(o); return acc; }, []);
+}
+
+// ---------- boot ----------
+(async () => {
+  let data;
+  try { data = await fetch("parcels.json").then(r => r.json()); }
+  catch(e){ pane.innerHTML = `<div class="banner">The parcel file (parcels.json) didn’t load. Make sure it’s uploaded next to this page, then reload.</div>`; return; }
+  $("#credit").textContent = "Parcels: Latah County GIS (snapshot " + SNAPSHOT_DATE + ")";
+  buildMap(data);
+  loadCountyLive().then(live => { liveCounty = true; buildParcels(live); $("#credit").textContent = "Parcels: Latah County GIS (live)"; if (!dirty) render(true); }).catch(() => {});
+  const st = loadStored(); if (st && st.name && st.pass && apiReady()){ auth = st; canWrite = true; }
+  render();
+  const id = location.hash.slice(1); if (id && byId.has(id)) select(id, true);
+  if (auth) sync();
+  setInterval(() => { if (auth && !document.hidden && !dirty && !busy) sync(); }, 60000);
+  document.addEventListener("visibilitychange", () => { if (!document.hidden && auth && !dirty && !busy) sync(); });
+})();
+})();
+</script>
+</body>
+</html>
